@@ -1,0 +1,17 @@
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies and builds
+node_modules/
+dist/
+
+# Local database and logs
+sentinel.db
+*.log
+
+# OS/editor noise
+.vscode/
+.DS_Store
+Thumbs.db
