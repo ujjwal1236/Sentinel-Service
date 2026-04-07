@@ -1,28 +1,23 @@
-import { getAllModels, updateModelStatus } from "../registry/registry.service";
-import { AlertPayload, sendAlert } from "../alerting/alert.service";
+import { getAllModels, updateModelStatus } from "../registry/registry.service.js";
+import { AlertPayload, sendAlert } from "../alerting/alert.service.js";
+import { mapError } from "../utils/errorMapper.js";
 
-import { OpenAIAdapter } from "../adapters/openai.adapter";
-import { GeminiAdapter } from "../adapters/gemini.adapter";
-import { AnthropicAdapter } from "../adapters/anthropic.adapter";
-import { CohereAdapter } from "../adapters/cohere.adapter";
-import { ENV } from "../../config/env";
-import { ProviderAdapter } from "../adapters/baseAdapter";
+import { OpenAIAdapter } from "../adapters/openai.adapter.js";
+import { GeminiAdapter } from "../adapters/gemini.adapter.js";
+import { AnthropicAdapter } from "../adapters/anthropic.adapter.js";
+import { CohereAdapter } from "../adapters/cohere.adapter.js";
+import { ENV } from "../../config/env.js";
+import { ModelCheckResult, ModelStatus, ProviderAdapter } from "../adapters/baseAdapter.js";
 
 type RegistryModel = {
   id: number;
   provider: string;
   modelId: string;
-  status: string;
+  status: ModelStatus;
   lastVerified: string | null;
   metadata: string | null;
   deprecationDate: string | null;
   sunsetDate: string | null;
-};
-
-type ModelCheckResult = {
-  status: "active" | "deprecated" | "error" | "unknown";
-  message?: string;
-  sunsetDate?: string;
 };
 
 type ModelMetadata = {
@@ -40,7 +35,7 @@ type HealthCheckDeps = {
   getAllModels: () => Promise<RegistryModel[]>;
   updateModelStatus: (
     id: number,
-    status: string,
+    status: ModelStatus,
     metadata: string | null,
     sunsetDate: string | null
   ) => Promise<void>;
@@ -91,26 +86,7 @@ function resetTransientMetadata(metadata: ModelMetadata): ModelMetadata {
 }
 
 function isTransientResult(result: ModelCheckResult) {
-  if (result.status === "unknown") {
-    return true;
-  }
-
-  if (result.status !== "error") {
-    return false;
-  }
-
-  const message = (result.message || "").toLowerCase();
-  return [
-    "provider internal error",
-    "network",
-    "timeout",
-    "timed out",
-    "socket",
-    "econn",
-    "enotfound",
-    "fetch failed",
-    "temporary"
-  ].some((token) => message.includes(token));
+  return result.transient === true || result.status === "unknown";
 }
 
 async function verifyModelWithRetry(adapter: ProviderAdapter, modelId: string) {
@@ -130,30 +106,26 @@ async function verifyModelWithRetry(adapter: ProviderAdapter, modelId: string) {
   return result;
 }
 
-function buildDefaultAdapters(): Record<string, ProviderAdapter> {
-  return {
-  openai: new OpenAIAdapter(ENV.OPENAI_API_KEY || ""),
-  gemini: new GeminiAdapter(ENV.GEMINI_API_KEY || ""),
-  anthropic: new AnthropicAdapter(ENV.ANTHROPIC_API_KEY || ""),
-  cohere: new CohereAdapter(ENV.COHERE_API_KEY || "")
-  };
+export function buildDefaultAdapters(): Record<string, ProviderAdapter> {
+  const adapters: Record<string, ProviderAdapter> = {};
+  // In mock mode every adapter is created (OpenAI handles mock logic).
+  // In real mode, only create adapters when an API key is present.
+  if (ENV.USE_MOCK || ENV.OPENAI_API_KEY) adapters.openai = new OpenAIAdapter(ENV.OPENAI_API_KEY || "");
+  if (ENV.USE_MOCK || ENV.ANTHROPIC_API_KEY) adapters.anthropic = new AnthropicAdapter(ENV.ANTHROPIC_API_KEY || "");
+  if (ENV.USE_MOCK || ENV.COHERE_API_KEY) adapters.cohere = new CohereAdapter(ENV.COHERE_API_KEY || "");
+  if (ENV.USE_MOCK || ENV.GEMINI_API_KEY) adapters.gemini = new GeminiAdapter(ENV.GEMINI_API_KEY || "");
+  return adapters;
 }
-
-const defaultDeps: HealthCheckDeps = {
-  getAllModels: getAllModels as () => Promise<RegistryModel[]>,
-  updateModelStatus,
-  sendAlert,
-  adapters: buildDefaultAdapters()
-};
 
 export async function runHealthCheck(overrides: Partial<HealthCheckDeps> = {}) {
   const deps: HealthCheckDeps = {
-    ...defaultDeps,
+    getAllModels: getAllModels as () => Promise<RegistryModel[]>,
+    updateModelStatus,
+    sendAlert,
     ...overrides,
-    adapters: overrides.adapters || defaultDeps.adapters
+    adapters: overrides.adapters ?? buildDefaultAdapters()
   };
 
-  console.log("hit check");
   console.log("Running health check...");
 
   const models = await deps.getAllModels();
@@ -179,40 +151,65 @@ export async function runHealthCheck(overrides: Partial<HealthCheckDeps> = {}) {
         const availableModels = await adapter.fetchModels();
         const availableModelIds = new Set(availableModels);
 
-        for (const model of providerModels) {
+        await Promise.allSettled(providerModels.map(async (model) => {
+          try {
           const metadata = parseMetadata(model.metadata);
 
+          let result: ModelCheckResult;
+
           if (!availableModelIds.has(model.modelId)) {
-            await deps.updateModelStatus(
-              model.id,
-              "deprecated",
-              JSON.stringify(resetTransientMetadata(metadata)),
-              null
-            );
-            console.log(
-              `Model: ${model.modelId} | Provider: ${model.provider} | Status: deprecated`
-            );
-              await deps.sendAlert(
-                createAlertPayload(
-                  "critical",
-                  model,
-                  "deprecated",
-                  "Model deprecated"
-                )
+            // Two-step deprecation guard: only mark deprecated when verifyModel also
+            // confirms the model is gone (404 → "deprecated"). This protects against
+            // partial provider responses caused by pagination limits, account-tier
+            // filtering, or temporary API glitches falsely deprecating valid models.
+            const crossCheck = await verifyModelWithRetry(adapter, model.modelId);
+            if (crossCheck.status === "deprecated") {
+              await deps.updateModelStatus(
+                model.id,
+                "deprecated",
+                JSON.stringify(resetTransientMetadata(metadata)),
+                null
               );
-            continue;
+              console.log(
+                `Model: ${model.modelId} | Provider: ${model.provider} | Status: deprecated`
+              );
+              if (model.status !== "deprecated") {
+                await deps.sendAlert(
+                  createAlertPayload(
+                    "critical",
+                    model,
+                    "deprecated",
+                    crossCheck.message || "Model deprecated"
+                  )
+                );
+              }
+              return;
+            }
+            // Cross-check returned a non-deprecated status — provider list may be
+            // partial. Fall through to normal result processing (auth errors, transient
+            // handling) using the cross-check result so the model isn't silently skipped.
+            console.warn(
+              `Model ${model.modelId} (${model.provider}) absent from provider list but ` +
+              `verifyModel returned "${crossCheck.status}" — skipping deprecation (possible partial list)`
+            );
+            result = crossCheck;
+          } else {
+            result = await verifyModelWithRetry(adapter, model.modelId);
           }
 
-          const result = await verifyModelWithRetry(adapter, model.modelId);
           const status = result.status;
+          const isTransient = isTransientResult(result);
           let nextMetadata: ModelMetadata;
 
-          if (status === "unknown") {
+          let shouldAlert = false;
+
+          if (isTransient) {
             const transientFailureCount = (metadata.transientFailureCount || 0) + 1;
+            shouldAlert = transientFailureCount >= 2 && !metadata.transientAlerted;
             nextMetadata = {
               ...metadata,
               transientFailureCount,
-              transientAlerted: metadata.transientAlerted || false,
+              transientAlerted: metadata.transientAlerted || shouldAlert,
               lastTransientFailureAt: new Date().toISOString(),
               lastTransientMessage: result.message
             };
@@ -220,18 +217,23 @@ export async function runHealthCheck(overrides: Partial<HealthCheckDeps> = {}) {
             nextMetadata = resetTransientMetadata(metadata);
           }
 
+          // Transient failures (5xx, network, rate-limit) are stored as "unknown"
+          // so the registry accurately reflects "unreachable" rather than conflating
+          // temporary outages with permanent auth/config errors.
+          const dbStatus = isTransient ? "unknown" : status;
+
           await deps.updateModelStatus(
             model.id,
-            status,
+            dbStatus,
             JSON.stringify(nextMetadata),
             result.sunsetDate || null
           );
 
           console.log(
-            `Model: ${model.modelId} | Provider: ${model.provider} | Status: ${status}`
+            `Model: ${model.modelId} | Provider: ${model.provider} | Status: ${dbStatus}`
           );
 
-          if (status === "deprecated") {
+          if (status === "deprecated" && model.status !== "deprecated") {
             await deps.sendAlert(
               createAlertPayload(
                 "critical",
@@ -242,7 +244,7 @@ export async function runHealthCheck(overrides: Partial<HealthCheckDeps> = {}) {
             );
           }
 
-          if (status === "error") {
+          if (status === "error" && !isTransient) {
             await deps.sendAlert(
               createAlertPayload(
                 "critical",
@@ -253,22 +255,12 @@ export async function runHealthCheck(overrides: Partial<HealthCheckDeps> = {}) {
             );
           }
 
-          if (status === "unknown") {
+          if (isTransient) {
             console.log(
               `Warning: Temporary issue → ${model.modelId} (${model.provider})`
             );
 
-            if (
-              (nextMetadata.transientFailureCount || 0) >= 2 &&
-              !nextMetadata.transientAlerted
-            ) {
-              nextMetadata.transientAlerted = true;
-              await deps.updateModelStatus(
-                model.id,
-                status,
-                JSON.stringify(nextMetadata),
-                null
-              );
+            if (shouldAlert) {
               await deps.sendAlert(
                 createAlertPayload(
                   "warning",
@@ -279,9 +271,33 @@ export async function runHealthCheck(overrides: Partial<HealthCheckDeps> = {}) {
               );
             }
           }
-        }
+          } catch (modelErr: any) {
+            console.error(`Error processing model ${model.modelId} (${provider}):`, modelErr.message);
+          }
+        }));
       } catch (err: any) {
+        const mapped = mapError(err);
+        const isTransient = mapped.transient === true;
+        const dbStatus: ModelStatus = isTransient ? "unknown" : "error";
+
         console.error(`Health check failed for provider ${provider}:`, err.message);
+        // Mark non-deprecated models; use "unknown" for transient provider outages
+        // to avoid conflating temporary 5xx/network issues with permanent auth failures.
+        await Promise.allSettled(
+          providerModels
+            .filter((model) => model.status !== "deprecated")
+            .map((model) =>
+              deps.updateModelStatus(model.id, dbStatus, model.metadata, null)
+            )
+        );
+        await deps.sendAlert({
+          severity: isTransient ? "warning" : "critical",
+          provider,
+          modelId: "(all models)",
+          status: dbStatus,
+          timestamp: new Date().toISOString(),
+          message: err.message || "Provider health check failed — API key invalid or provider unreachable"
+        });
       }
     }
   );

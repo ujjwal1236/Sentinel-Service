@@ -1,11 +1,11 @@
-import { runHealthCheck } from "../modules/checker/checker.service";
-import { ProviderAdapter } from "../modules/adapters/baseAdapter";
+import { runHealthCheck } from "../modules/checker/checker.service.js";
+import { ModelStatus, ProviderAdapter } from "../modules/adapters/baseAdapter.js";
 
 type DemoModel = {
   id: number;
   provider: string;
   modelId: string;
-  status: string;
+  status: ModelStatus;
   lastVerified: string | null;
   metadata: string | null;
   deprecationDate: string | null;
@@ -32,11 +32,11 @@ async function main() {
   const alerts: Array<{ severity: string; status: string; provider: string; modelId: string; message: string }> = [];
 
   const cohereAdapter: ProviderAdapter = {
-    fetchModels: async () => ["command-r"],
-    verifyModel: async () => ({
-      status: "deprecated",
-      message: "Model not found"
-    })
+    // Simulate Cohere removing the model from their API list — the primary deprecation path.
+    // verifyModel IS called as a two-step cross-check when the model is absent from fetchModels.
+    // Returning "deprecated" here simulates the 404 response that confirms the model is gone.
+    fetchModels: async () => [],
+    verifyModel: async () => ({ status: "deprecated", message: "Model not found or deprecated" })
   };
 
   await runHealthCheck({

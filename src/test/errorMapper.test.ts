@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapError } from "../modules/utils/errorMapper";
+import { mapError } from "../modules/utils/errorMapper.js";
 
 describe("error mapper", () => {
   it("maps 401 to auth error", () => {
@@ -24,5 +24,42 @@ describe("error mapper", () => {
     const result = mapError({ message: "socket hang up" });
     expect(result.status).toBe("error");
     expect(result.message).toContain("socket hang up");
+  });
+
+  it("maps 500 to transient error", () => {
+    const result = mapError({ status: 500 });
+    expect(result.status).toBe("error");
+    expect(result.transient).toBe(true);
+  });
+
+  it("maps 403 to auth error", () => {
+    const result = mapError({ status: 403 });
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("Forbidden");
+  });
+
+  it("maps network code to transient error", () => {
+    const result = mapError({ code: "ECONNREFUSED" });
+    expect(result.status).toBe("error");
+    expect(result.transient).toBe(true);
+  });
+
+  it("maps 502 to transient error", () => {
+    const result = mapError({ status: 502 });
+    expect(result.status).toBe("error");
+    expect(result.transient).toBe(true);
+  });
+
+  it("maps 503 to transient error", () => {
+    const result = mapError({ status: 503 });
+    expect(result.status).toBe("error");
+    expect(result.transient).toBe(true);
+  });
+
+  it("maps TimeoutError to transient error", () => {
+    const result = mapError({ name: "TimeoutError" });
+    expect(result.status).toBe("error");
+    expect(result.transient).toBe(true);
+    expect(result.message).toContain("timed out");
   });
 });

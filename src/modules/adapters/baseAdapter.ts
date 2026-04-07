@@ -1,7 +1,10 @@
+export type ModelStatus = "active" | "deprecated" | "error" | "unknown";
+
 export interface ModelCheckResult {
-  status: "active" | "deprecated" | "error" | "unknown";
+  status: ModelStatus;
   message?: string;
   sunsetDate?: string;
+  transient?: boolean;
 }
 
 export interface ProviderAdapter {

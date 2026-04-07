@@ -93,6 +93,7 @@ Create a .env file in project root:
 
 ```env
 USE_MOCK=true
+PORT=3000
 MOZART_API_URL=https://api-dev.mozart.la
 MOZART_API_TOKEN=
 OPENAI_API_KEY=
@@ -100,6 +101,7 @@ ANTHROPIC_API_KEY=
 COHERE_API_KEY=
 GEMINI_API_KEY=
 SLACK_WEBHOOK_URL=
+DB_PATH=
 ```
 
 Notes:
@@ -110,6 +112,18 @@ Notes:
 ## Run the Service
 
 Development:
+
+```bash
+pnpm install
+```
+
+Seed the model registry (run once after first install):
+
+```bash
+pnpm seed
+```
+
+Start in development mode:
 
 ```bash
 pnpm dev
@@ -126,6 +140,22 @@ Run built app:
 ```bash
 pnpm start
 ```
+
+## Running Tests
+
+```bash
+pnpm test
+```
+
+## Demo Failure Script
+
+Simulates a Cohere model deprecation (without real API keys) to prove the full detection and alerting path:
+
+```bash
+pnpm demo:failure
+```
+
+Expected: `Demo passed: Cohere 404 simulation correctly triggered critical deprecated alert.`
 
 Swagger UI:
 
@@ -247,7 +277,7 @@ Tests no longer disable TLS verification globally.
 ## Assignment Mapping Summary
 
 - Model registry and statuses: implemented
-- Provider adapters: implemented (OpenAI, Anthropic, Cohere)
+- Provider adapters: implemented (OpenAI, Anthropic, Cohere, Gemini)
 - Deprecation detection: implemented via registry-vs-provider comparison
 - Retry logic with backoff: implemented
 - Warning escalation across runs: implemented
@@ -287,11 +317,11 @@ This confirms the endpoint is reachable and requires authentication.
 - Requirement: OpenAI, Anthropic, Cohere adapters.
   - Status: Implemented.
 - Requirement: Fetch current model list per provider.
-  - Status: Implemented with fallback behavior.
-  - Notes: OpenAI and Cohere fetch from API in real mode; Anthropic verifies known models against API and falls back conservatively.
+  - Status: Implemented.
+  - Notes: All four adapters fetch live model lists from their respective provider APIs in real mode.
 - Requirement: Lightweight ping/key validity check.
   - Status: Implemented.
-  - Notes: OpenAI, Anthropic, and Cohere perform request-based checks; missing/invalid keys map to auth failures.
+  - Notes: Each adapter verifies via a real API request; missing/invalid keys map to auth failures.
 - Requirement: Error code mapping (401/404/429/500) and differentiation.
   - Status: Implemented in centralized mapper.
   - Notes: Auth/deprecated/rate-limit/internal-error are differentiated.

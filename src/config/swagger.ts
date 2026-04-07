@@ -1,4 +1,5 @@
 import swaggerJsdoc from "swagger-jsdoc";
+import { ENV } from "./env.js";
 
 const options = {
   definition: {
@@ -10,11 +11,11 @@ const options = {
     },
     servers: [
       {
-        url: "http://localhost:3000"
+        url: `http://localhost:${ENV.PORT}`
       }
     ]
   },
-  apis: ["./src/routes/*.ts"] // 👈 important
+  apis: ["./src/routes/*.ts"]
 };
 
 export const swaggerSpec = swaggerJsdoc(options);

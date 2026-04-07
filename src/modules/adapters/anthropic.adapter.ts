@@ -1,52 +1,55 @@
-import { mapError } from "../utils/errorMapper";
-import { ModelCheckResult } from "./baseAdapter";
+import { mapError } from "../utils/errorMapper.js";
+import { ModelCheckResult, ProviderAdapter } from "./baseAdapter.js";
+import { ENV } from "../../config/env.js";
 
-const knownModels = ["claude-3-5-sonnet", "claude-3-haiku"];
+const mockModels = ["claude-3-5-sonnet", "claude-3-haiku"];
 
-export class AnthropicAdapter {
+export class AnthropicAdapter implements ProviderAdapter {
   constructor(private apiKey: string) {}
 
   async fetchModels(): Promise<string[]> {
-    // Anthropic doesn't have a dedicated models.list() endpoint,
-    // so we verify models by making actual API calls to each known model.
-    // This ensures we're fetching updated model availability.
-    
-    const availableModels: string[] = [];
-
-    for (const modelId of knownModels) {
-      try {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "x-api-key": this.apiKey,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            model: modelId,
-            max_tokens: 1,
-            messages: [{ role: "user", content: "test" }],
-          }),
-        });
-
-        // If request succeeds, model exists
-        // We mark it as available if we got a response from the API
-        if (res.status !== 401) {
-          availableModels.push(modelId);
-        }
-      } catch (err) {
-        // Network error or other issue - skip this model
-        console.log(`Anthropic fetchModels: Could not verify ${modelId}:`, (err as any).message);
-      }
+    if (ENV.USE_MOCK) return mockModels;
+    if (!this.apiKey) {
+      throw new Error("Auth failure: Missing Anthropic API key");
     }
-
-    return availableModels.length > 0 ? availableModels : knownModels;
+    const res = await fetch("https://api.anthropic.com/v1/models", {
+      method: "GET",
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01"
+      }
+    });
+    if (!res.ok) {
+      const error = await res.json();
+      throw { status: res.status, error };
+    }
+    const json = await res.json();
+    const ids: string[] = Array.isArray(json?.data)
+      ? json.data
+          .map((m: any) => (typeof m?.id === "string" ? m.id.replace(/-\d{8}$/, "") : null))
+          .filter((id: string | null): id is string => id !== null)
+      : [];
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) {
+      throw new Error("Anthropic returned an empty model list");
+    }
+    return unique;
   }
 
   async verifyModel(modelId: string): Promise<ModelCheckResult> {
+    if (ENV.USE_MOCK) {
+      return mockModels.includes(modelId)
+        ? { status: "active" }
+        : { status: "deprecated", message: "Model not found" };
+    }
+    if (!this.apiKey) {
+      return { status: "error", message: "Auth failure: Missing Anthropic API key" };
+    }
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
+        signal: AbortSignal.timeout(10000),
         headers: {
           "x-api-key": this.apiKey,
           "anthropic-version": "2023-06-01",
@@ -66,7 +69,6 @@ export class AnthropicAdapter {
 
       return { status: "active" };
     } catch (err: any) {
-      console.log("Anthropic verifyModel error:", err);
       return mapError(err);
     }
   }

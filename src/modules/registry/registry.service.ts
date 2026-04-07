@@ -1,8 +1,8 @@
-import { dbPromise } from "../../database/db";
+import { dbPromise } from "../../database/db.js";
+import { ModelStatus } from "../adapters/baseAdapter.js";
 
-async function ensureModelsTable() {
+const tableReady: Promise<void> = (async () => {
   const db = await dbPromise;
-
   await db.exec(`
     CREATE TABLE IF NOT EXISTS models (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,6 +16,15 @@ async function ensureModelsTable() {
       UNIQUE(provider, modelId)
     )
   `);
+})();
+
+tableReady.catch((err: unknown) => {
+  console.error("Fatal: failed to initialize database schema:", err);
+  process.exit(1);
+});
+
+export async function ensureModelsTable() {
+  await tableReady;
 }
 
 export async function getAllModels() {
@@ -26,7 +35,7 @@ export async function getAllModels() {
 
 export async function updateModelStatus(
   id: number,
-  status: string,
+  status: ModelStatus,
   metadata: string | null = null,
   sunsetDate: string | null = null
 ) {
@@ -39,12 +48,13 @@ export async function updateModelStatus(
        SET status = ?, 
            lastVerified = datetime('now'),
            metadata = ?,
-           deprecationDate = datetime('now'),
+           deprecationDate = COALESCE(deprecationDate, datetime('now')),
            sunsetDate = ?
        WHERE id = ?`,
       [status, metadata, sunsetDate, id]
     );
-  } else {
+  } else if (status === "active") {
+    // Full recovery: clear deprecation and transient history
     await db.run(
       `UPDATE models 
        SET status = ?, 
@@ -52,6 +62,16 @@ export async function updateModelStatus(
            metadata = ?,
            deprecationDate = NULL,
            sunsetDate = NULL
+       WHERE id = ?`,
+      [status, metadata, id]
+    );
+  } else {
+    // error / unknown: preserve existing deprecationDate so historical data is not lost
+    await db.run(
+      `UPDATE models 
+       SET status = ?, 
+           lastVerified = datetime('now'),
+           metadata = ?
        WHERE id = ?`,
       [status, metadata, id]
     );

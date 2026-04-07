@@ -1,45 +1,53 @@
-import { mapError } from "../utils/errorMapper";
-import { ModelCheckResult } from "./baseAdapter";
+import { mapError } from "../utils/errorMapper.js";
+import { ModelCheckResult, ProviderAdapter } from "./baseAdapter.js";
+import { ENV } from "../../config/env.js";
 
-export class CohereAdapter {
-  constructor(private apiKey?: string) {}
+const mockModels = ["command-r", "command-r-plus"];
+
+export class CohereAdapter implements ProviderAdapter {
+  constructor(private apiKey: string) {}
 
   async fetchModels(): Promise<string[]> {
+    if (ENV.USE_MOCK) return mockModels;
     if (!this.apiKey) {
-      return ["command-r", "command-r-plus"];
+      throw new Error("Auth failure: Missing Cohere API key");
     }
 
-    try {
-      const res = await fetch("https://api.cohere.com/v1/models", {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json"
-        }
-      });
-
-      if (!res.ok) {
-        const error = await res.json();
-        throw { status: res.status, error };
+    const res = await fetch("https://api.cohere.com/v1/models", {
+      method: "GET",
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json"
       }
+    });
 
-      const json = await res.json();
-      const models = Array.isArray(json?.models)
-        ? json.models
-            .map((model: any) => model?.name)
-            .filter((name: unknown): name is string => typeof name === "string")
-        : [];
-
-      return models.length > 0 ? models : ["command-r", "command-r-plus"];
-    } catch (err: any) {
-      console.log("Cohere fetchModels fallback triggered:", err?.message || err);
-      return ["command-r", "command-r-plus"];
+    if (!res.ok) {
+      const error = await res.json();
+      throw { status: res.status, error };
     }
+
+    const json = await res.json();
+    const models = Array.isArray(json?.models)
+      ? json.models
+          .map((model: any) => model?.name)
+          .filter((name: unknown): name is string => typeof name === "string")
+      : [];
+
+    if (models.length === 0) {
+      throw new Error("Cohere returned an empty model list");
+    }
+
+    return models;
   }
 
   async verifyModel(modelId: string): Promise<ModelCheckResult> {
+    if (ENV.USE_MOCK) {
+      return mockModels.includes(modelId)
+        ? { status: "active" }
+        : { status: "deprecated", message: "Model not found" };
+    }
     if (!this.apiKey) {
-      console.log(`Cohere: No API key provided for ${modelId}`);
       return {
         status: "error",
         message: "Auth failure: Missing API key"
@@ -47,10 +55,9 @@ export class CohereAdapter {
     }
 
     try {
-      // Real Cohere API call to verify model availability
-      // Uses the chat endpoint with a minimal request to test API key validity
       const res = await fetch("https://api.cohere.com/v1/chat", {
         method: "POST",
+        signal: AbortSignal.timeout(10000),
         headers: {
           "Authorization": `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
@@ -67,15 +74,8 @@ export class CohereAdapter {
         throw { status: res.status, error };
       }
 
-      console.log(`✅ Cohere ${modelId} verified via API`);
       return { status: "active" };
     } catch (err: any) {
-      console.log("Cohere verifyModel error:", err);
-
-      if (err?.status === 404) {
-        console.log(`⚠️  Cohere model ${modelId} is deprecated/removed`);
-      }
-
       return mapError(err);
     }
   }

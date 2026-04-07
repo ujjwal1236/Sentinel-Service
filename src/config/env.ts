@@ -8,6 +8,8 @@ const readEnv = (key: string) => {
 
 export const ENV = {
   USE_MOCK: process.env.USE_MOCK === "true",
+  PORT: parseInt(readEnv("PORT") || "3000", 10),
+  DB_PATH: readEnv("DB_PATH"),
   MOZART_API_URL: readEnv("MOZART_API_URL") || readEnv("SERVER_API_URL") || "https://api-dev.mozart.la",
   MOZART_API_TOKEN: readEnv("MOZART_API_TOKEN"),
   OPENAI_API_KEY: readEnv("OPENAI_API_KEY"),

@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from "axios";
-import { ENV } from "../../config/env";
+import { ENV } from "../../config/env.js";
 
 export type DeprecatedModelRef = {
   provider: string;
@@ -79,38 +79,44 @@ export class MozartSyncService {
     };
   }
 
-  async syncDeprecatedModels(deprecatedModels: DeprecatedModelRef[]) {
-    const results: Array<{
-      provider: string;
-      modelId: string;
-      ok: boolean;
-      error?: string;
-      request: { AIProvider: string; model: string };
-    }> = [];
+  async updateModel(provider: string, modelId: string, modelData: Partial<ModelInfo>) {
+    const payload = {
+      AIProvider: provider,
+      model: modelId,
+      modelData
+    };
 
-    for (const model of deprecatedModels) {
-      try {
-        const result = await this.deleteModel(model.provider, model.modelId);
-        results.push({
+    const response = await this.client.put("/api/v1/config/updateModel", payload);
+
+    return {
+      request: payload,
+      response: response.data
+    };
+  }
+
+  async syncDeprecatedModels(deprecatedModels: DeprecatedModelRef[]) {
+    const settled = await Promise.allSettled(
+      deprecatedModels.map((model) => this.deleteModel(model.provider, model.modelId))
+    );
+
+    return settled.map((outcome, i) => {
+      const model = deprecatedModels[i];
+      if (outcome.status === "fulfilled") {
+        return {
           provider: model.provider,
           modelId: model.modelId,
           ok: true,
-          request: result.request
-        });
-      } catch (error: any) {
-        results.push({
-          provider: model.provider,
-          modelId: model.modelId,
-          ok: false,
-          error: error?.response?.data?.message || error?.message || "Unknown error",
-          request: {
-            AIProvider: model.provider,
-            model: model.modelId
-          }
-        });
+          request: outcome.value.request
+        };
       }
-    }
-
-    return results;
+      const error = outcome.reason;
+      return {
+        provider: model.provider,
+        modelId: model.modelId,
+        ok: false,
+        error: error?.response?.data?.message || error?.message || "Unknown error",
+        request: { AIProvider: model.provider, model: model.modelId }
+      };
+    });
   }
 }

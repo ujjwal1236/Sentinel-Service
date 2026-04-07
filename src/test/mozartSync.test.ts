@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { MozartSyncService, ModelInfo } from "../modules/mozart-sync/mozartSync.service";
+import { MozartSyncService, ModelInfo } from "../modules/mozart-sync/mozartSync.service.js";
 
 function createMockClient() {
   return {
     post: vi.fn(),
-    delete: vi.fn()
+    delete: vi.fn(),
+    put: vi.fn()
   } as any;
 }
 
@@ -86,5 +87,22 @@ describe("MozartSyncService", () => {
     expect(results[0].ok).toBe(true);
     expect(results[1].ok).toBe(false);
     expect(results[1].error).toContain("Unauthorized");
+  });
+
+  it("updates a model with expected payload", async () => {
+    const client = createMockClient();
+    client.put.mockResolvedValue({ data: { ok: true } });
+
+    const service = new MozartSyncService("https://api-dev.mozart.la", "token", client);
+    const result = await service.updateModel("openai", "gpt-4o", { isPremium: true });
+
+    expect(client.put).toHaveBeenCalledWith("/api/v1/config/updateModel", {
+      AIProvider: "openai",
+      model: "gpt-4o",
+      modelData: { isPremium: true }
+    });
+
+    expect(result.request.AIProvider).toBe("openai");
+    expect(result.request.model).toBe("gpt-4o");
   });
 });

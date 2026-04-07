@@ -1,21 +1,10 @@
-import { dbPromise } from "./db";
+import { dbPromise } from "./db.js";
+import { ensureModelsTable } from "../modules/registry/registry.service.js";
 
 (async () => {
-  const db = await dbPromise;
+  await ensureModelsTable();
 
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS models (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      provider TEXT NOT NULL,
-      modelId TEXT NOT NULL,
-      status TEXT CHECK(status IN ('active', 'deprecated', 'error', 'unknown')) DEFAULT 'unknown',
-      lastVerified DATETIME,
-      metadata TEXT,
-      deprecationDate DATETIME,
-      sunsetDate DATETIME,
-      UNIQUE(provider, modelId)
-    )
-  `);
+  const db = await dbPromise;
 
   const models = [
     // OpenAI
@@ -27,8 +16,8 @@ import { dbPromise } from "./db";
     { provider: "anthropic", modelId: "claude-3-haiku", status: "active" },
 
     // Cohere
-    { provider: "cohere", modelId: "command-r", status: "unknown" },
-    { provider: "cohere", modelId: "command-r-plus", status: "unknown" },
+    { provider: "cohere", modelId: "command-r", status: "active" },
+    { provider: "cohere", modelId: "command-r-plus", status: "active" },
 
     // Gemini
     { provider: "gemini", modelId: "gemini-1.5-flash", status: "active" },

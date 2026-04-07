@@ -1,16 +1,18 @@
 {
   "name": "sentinel-service",
   "version": "1.0.0",
-  "description": "",
+  "description": "LLM model health monitoring and alerting microservice",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "dev": "ts-node src/index.ts",
+    "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "seed": "tsx src/database/seed.ts",
     "lint": "echo \"add eslint later\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "demo:failure": "ts-node src/demo/failure.ts"
+    "demo:failure": "tsx src/demo/failure.ts"
   },
   "keywords": [],
   "author": "",
@@ -29,13 +31,12 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.0",
     "@types/nodemailer": "^7.0.11",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
-    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "vitest": "^3.2.4"
   },

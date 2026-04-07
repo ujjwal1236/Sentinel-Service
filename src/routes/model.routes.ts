@@ -1,20 +1,17 @@
-import { Router } from "express";
-import { getAllModels } from "../modules/registry/registry.service";
-import { runHealthCheck } from "../modules/checker/checker.service";
-import { OpenAIAdapter } from "../modules/adapters/openai.adapter";
-import { AnthropicAdapter } from "../modules/adapters/anthropic.adapter";
-import { CohereAdapter } from "../modules/adapters/cohere.adapter";
-import { GeminiAdapter } from "../modules/adapters/gemini.adapter";
-import { ENV } from "../config/env";
+﻿import { Router } from "express";
+import { getAllModels } from "../modules/registry/registry.service.js";
+import { runHealthCheck, buildDefaultAdapters } from "../modules/checker/checker.service.js";
+import { ProviderAdapter } from "../modules/adapters/baseAdapter.js";
 
 const router = Router();
 
-const adapters: Record<string, any> = {
-	openai: new OpenAIAdapter(ENV.OPENAI_API_KEY || ""),
-	anthropic: new AnthropicAdapter(ENV.ANTHROPIC_API_KEY || ""),
-	cohere: new CohereAdapter(ENV.COHERE_API_KEY || ""),
-	gemini: new GeminiAdapter(ENV.GEMINI_API_KEY || "")
-};
+let cachedAdapters: Record<string, ProviderAdapter> | null = null;
+
+function getAdapters(): Record<string, ProviderAdapter> {
+  if (cachedAdapters) return cachedAdapters;
+  cachedAdapters = buildDefaultAdapters();
+  return cachedAdapters;
+}
 
 /**
  * @swagger
@@ -34,8 +31,8 @@ router.get("/models", async (_req, res) => {
 	try {
 		const models = await getAllModels();
 		res.status(200).json(models);
-	} catch (err: any) {
-		res.status(500).json({ error: err?.message || "Failed to fetch models" });
+	} catch {
+		res.status(500).json({ error: "Failed to fetch models" });
 	}
 });
 
@@ -53,8 +50,8 @@ router.post("/check", async (_req, res) => {
 	try {
 		await runHealthCheck();
 		res.status(200).json({ ok: true, message: "Health check completed" });
-	} catch (err: any) {
-		res.status(500).json({ error: err?.message || "Health check failed" });
+	} catch {
+		res.status(500).json({ error: "Health check failed" });
 	}
 });
 
@@ -79,7 +76,7 @@ router.post("/check", async (_req, res) => {
  */
 router.get("/check/:provider/models", async (req, res) => {
 	const provider = String(req.params.provider || "").toLowerCase();
-	const adapter = adapters[provider];
+	const adapter = getAdapters()[provider];
 
 	if (!adapter) {
 		return res.status(400).json({ error: `Unsupported provider: ${provider}` });
@@ -88,11 +85,11 @@ router.get("/check/:provider/models", async (req, res) => {
 	try {
 		const models = await adapter.fetchModels();
 		return res.status(200).json({ provider, models });
-	} catch (err: any) {
-		return res
-			.status(500)
-			.json({ error: err?.message || `Failed to fetch models for ${provider}` });
-	}
+	} catch {
+			return res
+				.status(500)
+				.json({ error: `Failed to fetch models for ${provider}` });
+		}
 });
 
 /**
@@ -126,7 +123,7 @@ router.get("/check/:provider/models", async (req, res) => {
  */
 router.post("/check/:provider/verify", async (req, res) => {
 	const provider = String(req.params.provider || "").toLowerCase();
-	const adapter = adapters[provider];
+	const adapter = getAdapters()[provider];
 	const modelId = String(req.body?.modelId || "").trim();
 
 	if (!adapter) {
@@ -140,11 +137,11 @@ router.post("/check/:provider/verify", async (req, res) => {
 	try {
 		const result = await adapter.verifyModel(modelId);
 		return res.status(200).json({ provider, modelId, result });
-	} catch (err: any) {
-		return res
-			.status(500)
-			.json({ error: err?.message || `Failed to verify ${modelId}` });
-	}
+	} catch {
+			return res
+				.status(500)
+				.json({ error: `Failed to verify ${modelId}` });
+		}
 });
 
 export default router;

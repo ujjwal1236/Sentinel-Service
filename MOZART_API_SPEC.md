@@ -63,6 +63,23 @@ Example request:
 }
 ```
 
+## Update Model
+
+- Method: PUT
+- Endpoint: /api/v1/config/updateModel
+- Request body:
+
+```json
+{
+  "AIProvider": "cohere",
+  "model": "command-r",
+  "modelData": {
+    "status": "deprecated",
+    "deprecationDate": "2025-01-01T00:00:00.000Z"
+  }
+}
+```
+
 ## Service API in this repo
 
 Module: src/modules/mozart-sync/mozartSync.service.ts
@@ -72,6 +89,7 @@ Exports:
 - getModels()
 - createModel(provider, modelData)
 - deleteModel(provider, modelId)
+- updateModel(provider, modelId, modelData)
 - syncDeprecatedModels([{ provider, modelId }])
 
 ## Endpoint Reachability Check (performed)

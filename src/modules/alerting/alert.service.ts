@@ -1,6 +1,6 @@
 import axios from "axios";
 import nodemailer from "nodemailer";
-import { ENV } from "../../config/env";
+import { ENV } from "../../config/env.js";
 
 export type AlertSeverity = "critical" | "warning";
 
@@ -88,22 +88,21 @@ async function sendEmailAlert(payload: AlertPayload) {
 
   const subject = `[${payload.severity.toUpperCase()}] ${payload.provider}/${payload.modelId}`;
   const text = formatAlertText(payload);
+  const escHtml = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const html = `
+        <h3>${escHtml(payload.severity.toUpperCase())}: ${escHtml(payload.message)}</h3>
+        <p><strong>Model ID:</strong> ${escHtml(payload.modelId)}</p>
+        <p><strong>Provider:</strong> ${escHtml(payload.provider)}</p>
+        <p><strong>Status:</strong> ${escHtml(payload.status)}</p>
+        <p><strong>Timestamp:</strong> ${escHtml(payload.timestamp)}</p>
+      `;
 
-  for (const recipient of recipients) {
-    await transporter.sendMail({
-      from: ENV.ALERT_EMAIL_FROM,
-      to: recipient,
-      subject,
-      text,
-      html: `
-        <h3>${payload.severity.toUpperCase()}: ${payload.message}</h3>
-        <p><strong>Model ID:</strong> ${payload.modelId}</p>
-        <p><strong>Provider:</strong> ${payload.provider}</p>
-        <p><strong>Status:</strong> ${payload.status}</p>
-        <p><strong>Timestamp:</strong> ${payload.timestamp}</p>
-      `
-    });
-  }
+  await Promise.all(
+    recipients.map((recipient) =>
+      transporter.sendMail({ from: ENV.ALERT_EMAIL_FROM, to: recipient, subject, text, html })
+    )
+  );
 
   console.log(`Email alert sent to ${recipients.join(", ")}`);
 }

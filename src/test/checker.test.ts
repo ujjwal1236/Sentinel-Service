@@ -1,17 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { runHealthCheck } from "../modules/checker/checker.service";
-import { ProviderAdapter } from "../modules/adapters/baseAdapter";
-
-type TestModel = {
-  id: number;
-  provider: string;
-  modelId: string;
-  status: string;
-  lastVerified: string | null;
-  metadata: string | null;
-  deprecationDate: string | null;
-  sunsetDate: string | null;
-};
+import { runHealthCheck } from "../modules/checker/checker.service.js";
+import { ProviderAdapter } from "../modules/adapters/baseAdapter.js";
+import { TestModel } from "./helpers.js";
 
 describe("ci guard: deprecated model alerts", () => {
   it("fails if a deprecated model was not alerted in the run", async () => {
@@ -45,7 +35,9 @@ describe("ci guard: deprecated model alerts", () => {
       async fetchModels() {
         return ["command-r-plus"];
       },
-      async verifyModel() {
+      async verifyModel(modelId: string) {
+        // command-r is absent from the provider list; cross-check confirms it is gone
+        if (modelId === "command-r") return { status: "deprecated", message: "Model not found" };
         return { status: "active" };
       }
     };
